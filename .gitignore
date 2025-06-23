@@ -1,0 +1,6 @@
+# 忽略所有由 npm install 生成的模块文件夹
+node_modules
+
+# 忽略macOS系统自动生成的文件
+.DS_Store
+
