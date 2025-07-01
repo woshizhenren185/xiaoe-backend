@@ -9,20 +9,9 @@ const app = express();
 // Render 会自动提供 PORT 环境变量
 const PORT = process.env.PORT || 3001;
 
-// --- **** FIXED: 更严格的CORS白名单设置 **** ---
-// 定义允许访问我们后端服务的“白名单”
-const whitelist = ['https://taupe-churros-3f5212.netlify.app']; // 您的前端网址
-const corsOptions = {
-  origin: function (origin, callback) {
-    // 如果请求来源在白名单里，或者请求没有来源（比如直接用工具测试API），则允许
-    if (whitelist.indexOf(origin) !== -1 || !origin) {
-      callback(null, true)
-    } else {
-      callback(new Error('Not allowed by CORS'))
-    }
-  }
-};
-app.use(cors(corsOptions));
+// --- **** FIXED: Simplified CORS to allow all origins for debugging **** ---
+// 这是一个更开放的跨域设置，确保前端可以访问
+app.use(cors());
 app.use(express.json());
 
 
@@ -33,7 +22,7 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 // --- 内存数据库 ---
 const db = {
     users: {
-      'testuser': { password: 'password123', credits: 50 }
+      'test': { password: '123', credits: 999 } 
     }
 };
 
@@ -88,6 +77,7 @@ app.post('/api/create-payment', (req, res) => {
     });
 });
 
+
 // --- 受保护的核心接口1：生成评语 ---
 app.post('/api/generate-comment', async (req, res) => {
     console.log('收到了【评语生成】请求...');
@@ -140,50 +130,50 @@ app.listen(PORT, () => {
 });
 
 async function callAI(model, prompt, isSimpleArray) {
-    let apiKey, url, payload;
-    const commonHeaders = { 'Content-Type': 'application/json' };
+  let apiKey, url, payload;
+  const commonHeaders = { 'Content-Type': 'application/json' };
 
-    if (model === 'gemini') {
-        apiKey = GEMINI_API_KEY;
-        url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-        const schema = isSimpleArray 
-            ? { type: 'ARRAY', items: { type: 'STRING' } } 
-            : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
-        payload = { 
-            contents: [{ role: "user", parts: [{ text: prompt }] }], 
-            generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
-        };
-    } else if (model === 'deepseek' || model === 'openai') {
-        const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
-        apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
-        const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
-        url = `${baseHost}/chat/completions`;
-        payload = {
-            model: modelName,
-            messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature: 0.8,
-            max_tokens: 8192, 
-        };
-        commonHeaders['Authorization'] = `Bearer ${apiKey}`;
-    } else {
-        throw new Error('不支持的AI模型');
-    }
+  if (model === 'gemini') {
+      apiKey = GEMINI_API_KEY;
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+      const schema = isSimpleArray 
+          ? { type: 'ARRAY', items: { type: 'STRING' } } 
+          : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
+      payload = { 
+          contents: [{ role: "user", parts: [{ text: prompt }] }], 
+          generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
+      };
+  } else if (model === 'deepseek' || model === 'openai') {
+      const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
+      apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
+      const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
+      url = `${baseHost}/chat/completions`;
+      payload = {
+          model: modelName,
+          messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.8,
+          max_tokens: 8192, 
+      };
+      commonHeaders['Authorization'] = `Bearer ${apiKey}`;
+  } else {
+      throw new Error('不支持的AI模型');
+  }
 
-    const response = await fetch(url, { method: 'POST', headers: commonHeaders, body: JSON.stringify(payload) });
-    if (!response.ok) {
-        const errorBody = await response.text();
-        console.error(`${model} API Error Body:`, errorBody);
-        throw new Error(`${model} API error: ${response.statusText}`);
-    }
-    const data = await response.json();
-    let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
-    
-    let jsonString = rawText;
-    const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
-    if (match) jsonString = match[1] || match[2];
+  const response = await fetch(url, { method: 'POST', headers: commonHeaders, body: JSON.stringify(payload) });
+  if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`${model} API Error Body:`, errorBody);
+      throw new Error(`${model} API error: ${response.statusText}`);
+  }
+  const data = await response.json();
+  let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
+  
+  let jsonString = rawText;
+  const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
+  if (match) jsonString = match[1] || match[2];
 
-    return findArrayInJson(JSON.parse(jsonString));
+  return findArrayInJson(JSON.parse(jsonString));
 }
 
 function getBasePrompt(profiles, style) {
