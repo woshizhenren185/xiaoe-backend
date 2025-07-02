@@ -1,94 +1,149 @@
-// 引入我们需要的工具包
 const express = require('express');
 const cors = require('cors');
-// 使用与 package.json 中版本兼容的 require 方式
 const fetch = require('node-fetch');
+// **** NEW: Import Firebase Admin SDK ****
+const admin = require('firebase-admin');
 
-// 创建一个应用实例
+// --- **** NEW: Initialize Firebase **** ---
+// Get the service account key from environment variables
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY_JSON);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+// Get a reference to the Firestore database
+const db = admin.firestore();
+console.log('Successfully connected to Firebase Firestore.');
+
+
 const app = express();
-// Render 会自动提供 PORT 环境变量
 const PORT = process.env.PORT || 3001;
 
-// --- **** FIXED: Simplified CORS to allow all origins for debugging **** ---
-// 这是一个更开放的跨域设置，确保前端可以访问
+// --- Middleware ---
 app.use(cors());
 app.use(express.json());
 
-
-// --- 从环境变量安全地读取API密钥 ---
+// --- API Keys from Environment Variables ---
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
-// --- 内存数据库 ---
-const db = {
-    users: {
-      'test': { password: '123', credits: 999 } 
-    }
-};
 
-// --- 用户注册接口 ---
-app.post('/api/register', (req, res) => {
+// --- **** REWRITTEN: User Endpoints with Firestore **** ---
+
+// Register a new user
+app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
-      return res.status(400).json({ message: '用户名和密码不能为空' });
+        return res.status(400).json({ message: '用户名和密码不能为空' });
     }
-    if (db.users[username]) {
-      return res.status(400).json({ message: '用户名已存在' });
+    try {
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (doc.exists) {
+            return res.status(400).json({ message: '用户名已存在' });
+        }
+
+        const newUser = {
+            username,
+            password, // In a real app, you MUST hash the password!
+            credits: 50, // Welcome credits
+        };
+        await userRef.set(newUser);
+        
+        console.log('新用户注册成功:', username);
+        res.status(201).json({ message: '注册成功！', user: { username, credits: 50 } });
+    } catch (error) {
+        console.error("Register error:", error);
+        res.status(500).json({ message: "注册失败，服务器错误" });
     }
-    db.users[username] = { password, credits: 50 };
-    console.log('新用户注册成功:', db.users);
-    res.status(201).json({ message: '注册成功！', user: { username, credits: 50 } });
 });
 
-// --- 用户登录接口 ---
-app.post('/api/login', (req, res) => {
+// Login a user
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
-    const user = db.users[username];
-    if (!user || user.password !== password) {
-      return res.status(401).json({ message: '用户名或密码错误' });
+    try {
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (!doc.exists || doc.data().password !== password) {
+            return res.status(401).json({ message: '用户名或密码错误' });
+        }
+        
+        const userData = doc.data();
+        console.log('用户登录成功:', username);
+        res.json({ message: '登录成功！', user: { username: userData.username, credits: userData.credits } });
+    } catch (error) {
+        console.error("Login error:", error);
+        res.status(500).json({ message: "登录失败，服务器错误" });
     }
-    console.log('用户登录成功:', username);
-    res.json({ message: '登录成功！', user: { username, credits: user.credits } });
 });
 
-// --- 获取用户状态接口 ---
-app.get('/api/user/:username', (req, res) => {
-    const { username } = req.params;
-    const user = db.users[username];
-    if (!user) {
-        return res.status(404).json({ message: '用户不存在' });
+// Get user status
+app.get('/api/user/:username', async (req, res) => {
+    try {
+        const { username } = req.params;
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (!doc.exists) {
+            return res.status(404).json({ message: '用户不存在' });
+        }
+        const userData = doc.data();
+        res.json({ user: { username: userData.username, credits: userData.credits } });
+    } catch (error) {
+        console.error("Get user status error:", error);
+        res.status(500).json({ message: "获取用户信息失败" });
     }
-    res.json({ user: { username, credits: user.credits } });
 });
 
-// --- 模拟支付接口 ---
-app.post('/api/create-payment', (req, res) => {
+// Simulate payment to add credits
+app.post('/api/create-payment', async (req, res) => {
     const { username } = req.body;
-    console.log(`收到了用户 ${username} 的充值请求...`);
-    const user = db.users[username];
-    if (!user) {
-      return res.status(404).json({ message: '用户不存在，无法充值' });
+    try {
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (!doc.exists) {
+            return res.status(404).json({ message: '用户不存在，无法充值' });
+        }
+        
+        // Use Firestore's FieldValue to atomically increment credits
+        await userRef.update({
+            credits: admin.firestore.FieldValue.increment(50)
+        });
+        
+        const updatedDoc = await userRef.get();
+        const updatedUserData = updatedDoc.data();
+        
+        console.log(`模拟支付成功！用户 ${username} 的余额已更新为 ${updatedUserData.credits} 次。`);
+        res.json({
+            message: '充值成功！',
+            user: { username: updatedUserData.username, credits: updatedUserData.credits }
+        });
+    } catch (error) {
+        console.error("Payment error:", error);
+        res.status(500).json({ message: "充值失败，服务器错误" });
     }
-    user.credits += 50;
-    console.log(`模拟支付成功！用户 ${username} 的余额已更新为 ${user.credits} 次。`);
-    res.json({
-        message: '充值成功！',
-        user: { username, credits: user.credits }
-    });
 });
 
 
-// --- 受保护的核心接口1：生成评语 ---
+// --- Protected Core Endpoints ---
+
 app.post('/api/generate-comment', async (req, res) => {
-    console.log('收到了【评语生成】请求...');
     try {
         const { studentProfiles, commentStyle, model, username } = req.body;
-        const user = db.users[username];
-        const requiredCredits = studentProfiles.length;
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
 
-        if (!user) {
+        if (!doc.exists) {
             return res.status(401).json({ message: '用户未登录，请先登录' });
         }
+
+        const user = doc.data();
+        const requiredCredits = studentProfiles.length;
+
         if (user.credits < requiredCredits) {
             return res.status(403).json({ message: `次数不足！本次需要 ${requiredCredits} 次，您还剩 ${user.credits} 次。` });
         }
@@ -96,9 +151,11 @@ app.post('/api/generate-comment', async (req, res) => {
         const prompt = getBasePrompt(studentProfiles, commentStyle);
         const aiResponse = await callAI(model, prompt, false);
         
-        user.credits -= requiredCredits;
-        console.log(`用户 ${username} 消耗 ${requiredCredits} 次，剩余 ${user.credits} 次`);
-        
+        await userRef.update({
+            credits: admin.firestore.FieldValue.increment(-requiredCredits)
+        });
+
+        console.log(`用户 ${username} 消耗 ${requiredCredits} 次，剩余 ${user.credits - requiredCredits} 次`);
         res.json(aiResponse);
     } catch (error) {
         console.error('处理【评语生成】请求时出错:', error);
@@ -106,12 +163,13 @@ app.post('/api/generate-comment', async (req, res) => {
     }
 });
 
-// --- 受保护的核心接口2：生成同义句 ---
 app.post('/api/generate-alternatives', async (req, res) => {
-    console.log('收到了【同义句生成】请求...');
     try {
         const { originalText, sourceTag, commentStyle, model, username } = req.body;
-        if (!db.users[username]) {
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (!doc.exists) {
             return res.status(401).json({ message: '用户未登录，请先登录' });
         }
         
@@ -125,55 +183,59 @@ app.post('/api/generate-alternatives', async (req, res) => {
     }
 });
 
+
+// --- Server Start ---
 app.listen(PORT, () => {
-    console.log(`后台办公室已经启动，正在 http://localhost:${PORT} 等待指令`);
+  console.log(`后台办公室已经启动，正在 http://localhost:${PORT} 等待指令`);
 });
 
+
+// --- Helper Functions ---
 async function callAI(model, prompt, isSimpleArray) {
-  let apiKey, url, payload;
-  const commonHeaders = { 'Content-Type': 'application/json' };
+    let apiKey, url, payload;
+    const commonHeaders = { 'Content-Type': 'application/json' };
 
-  if (model === 'gemini') {
-      apiKey = GEMINI_API_KEY;
-      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-      const schema = isSimpleArray 
-          ? { type: 'ARRAY', items: { type: 'STRING' } } 
-          : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
-      payload = { 
-          contents: [{ role: "user", parts: [{ text: prompt }] }], 
-          generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
-      };
-  } else if (model === 'deepseek' || model === 'openai') {
-      const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
-      apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
-      const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
-      url = `${baseHost}/chat/completions`;
-      payload = {
-          model: modelName,
-          messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
-          response_format: { type: 'json_object' },
-          temperature: 0.8,
-          max_tokens: 8192, 
-      };
-      commonHeaders['Authorization'] = `Bearer ${apiKey}`;
-  } else {
-      throw new Error('不支持的AI模型');
-  }
+    if (model === 'gemini') {
+        apiKey = GEMINI_API_KEY;
+        url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+        const schema = isSimpleArray 
+            ? { type: 'ARRAY', items: { type: 'STRING' } } 
+            : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
+        payload = { 
+            contents: [{ role: "user", parts: [{ text: prompt }] }], 
+            generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
+        };
+    } else if (model === 'deepseek' || model === 'openai') {
+        const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
+        apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
+        const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
+        url = `${baseHost}/chat/completions`;
+        payload = {
+            model: modelName,
+            messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
+            response_format: { type: 'json_object' },
+            temperature: 0.8,
+            max_tokens: 8192, 
+        };
+        commonHeaders['Authorization'] = `Bearer ${apiKey}`;
+    } else {
+        throw new Error('不支持的AI模型');
+    }
 
-  const response = await fetch(url, { method: 'POST', headers: commonHeaders, body: JSON.stringify(payload) });
-  if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(`${model} API Error Body:`, errorBody);
-      throw new Error(`${model} API error: ${response.statusText}`);
-  }
-  const data = await response.json();
-  let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
-  
-  let jsonString = rawText;
-  const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
-  if (match) jsonString = match[1] || match[2];
+    const response = await fetch(url, { method: 'POST', headers: commonHeaders, body: JSON.stringify(payload) });
+    if (!response.ok) {
+        const errorBody = await response.text();
+        console.error(`${model} API Error Body:`, errorBody);
+        throw new Error(`${model} API error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
+    
+    let jsonString = rawText;
+    const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
+    if (match) jsonString = match[1] || match[2];
 
-  return findArrayInJson(JSON.parse(jsonString));
+    return findArrayInJson(JSON.parse(jsonString));
 }
 
 function getBasePrompt(profiles, style) {
