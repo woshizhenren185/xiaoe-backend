@@ -1,7 +1,7 @@
 {
   "name": "xiaoe-backend",
   "version": "1.0.0",
-  "description": "Backend service for XiaoE Comment Generator with Firebase",
+  "description": "Backend service for XiaoE Comment Generator with Firebase and Alipay",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,8 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "firebase-admin": "^12.1.0",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "alipay-sdk": "^3.7.1"
   },
   "author": "",
   "license": "ISC"
