@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const AlipaySdk = require('alipay-sdk').default;
+// **** NEW: Import Axios ****
 const axios = require('axios');
 
 // =================================================================
@@ -124,7 +125,6 @@ app.post('/api/create-alipay-order', async (req, res) => {
 app.post('/api/alipay-payment-notify', async (req, res) => {
     console.log("[Payment] Received Alipay notification.");
     try {
-        // The alipay-sdk's checkNotifySign method expects a parsed object.
         const isVerified = alipaySdk.checkNotifySign(req.body);
         if (!isVerified) {
             console.error("[Payment Notify] Signature verification failed!");
@@ -174,6 +174,22 @@ app.post('/api/generate-comment', async (req, res) => {
     }
 });
 
+app.post('/api/generate-alternatives', async (req, res) => {
+    try {
+        const { originalText, sourceTag, commentStyle, model, username } = req.body;
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+        if (!doc.exists) return res.status(401).json({ message: '用户未登录' });
+        
+        const prompt = `你是一个语言表达大师。请将下面的句子，用5种不同的、高质量的方式重新表达，同时保持核心意思和“${commentStyle}”的风格。句子：“${originalText}”。它描述的概念是“${sourceTag}”。请以JSON数组的格式返回5个字符串。`;
+        const aiResponse = await callAI(model, prompt, true);
+        res.json(aiResponse);
+    } catch (error) {
+        console.error('[Generate Alternatives Error]', error);
+        res.status(500).json({ message: '服务器处理同义句请求失败', error: error.message });
+    }
+});
+
 // =================================================================
 // 5. 启动服务器 (Start Server)
 // =================================================================
@@ -185,7 +201,6 @@ app.listen(PORT, () => {
 // 6. 辅助函数 (Helper Functions)
 // =================================================================
 async function callAI(model, prompt, isSimpleArray) {
-    // This function remains largely the same, using Axios for requests
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
     let apiKey, url, payload, headers;
