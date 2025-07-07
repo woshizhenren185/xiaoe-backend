@@ -30,21 +30,15 @@ const formatKey = (key) => {
     return key.replace(/\\n/g, '\n');
 };
 
-// **** FIXED: Declare alipaySdk outside the try block ****
-let alipaySdk;
-try {
-    alipaySdk = new AlipaySdk({
-        appId: process.env.ALIPAY_APP_ID,
-        privateKey: formatKey(process.env.ALIPAY_PRIVATE_KEY),
-        alipayPublicKey: formatKey(process.env.ALIPAY_PUBLIC_KEY),
-        gateway: 'https://openapi.alipay.com/gateway.do',
-        keyType: 'PKCS8',
-    });
-    console.log('✅ Alipay SDK initialized.');
-} catch(error) {
-    console.error('❌ Alipay SDK initialization failed:', error.message);
-}
-
+// 初始化 Alipay SDK
+const alipaySdk = new AlipaySdk({
+    appId: process.env.ALIPAY_APP_ID,
+    privateKey: formatKey(process.env.ALIPAY_PRIVATE_KEY),
+    alipayPublicKey: formatKey(process.env.ALIPAY_PUBLIC_KEY),
+    gateway: 'https://openapi.alipay.com/gateway.do',
+    keyType: 'PKCS8',
+});
+console.log('✅ Alipay SDK initialized.');
 
 // 初始化 Express 应用
 const app = express();
@@ -53,7 +47,13 @@ const PORT = process.env.PORT || 3001;
 // =================================================================
 // 3. 中间件设置 (Middleware Setup)
 // =================================================================
-app.use(cors()); 
+
+// **** FIXED: A more robust CORS configuration to handle preflight requests ****
+app.use(cors({
+    origin: '*', // Allow all origins
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allow all methods
+    allowedHeaders: ['Content-Type', 'Authorization'], // Allow specific headers
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
