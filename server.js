@@ -24,9 +24,9 @@ try {
 }
 const db = admin.firestore();
 
-// **** FIXED: Robustly handle private key from environment variable ****
-// Environment variables might escape newlines. We need to restore them.
+// 密钥格式化函数
 const formatKey = (key) => {
+    if (!key) return '';
     return key.replace(/\\n/g, '\n');
 };
 
@@ -47,7 +47,22 @@ const PORT = process.env.PORT || 3001;
 // =================================================================
 // 3. 中间件设置 (Middleware Setup)
 // =================================================================
-app.use(cors());
+
+// **** FIXED: Added specific CORS whitelist for your Netlify sites ****
+const whitelist = [
+    'https://taupe-churros-3f5212.netlify.app',
+    'https://phenomenal-unicorn-ed016c.netlify.app'
+];
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (whitelist.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
