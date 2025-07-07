@@ -1,249 +1,253 @@
-// =================================================================
-// 1. 引入核心模块 (Import Core Modules)
-// =================================================================
+// 引入我们需要的工具包
 const express = require('express');
 const cors = require('cors');
+// 使用与 package.json 中版本兼容的 require 方式
+const fetch = require('node-fetch');
 const admin = require('firebase-admin');
-// **** FIXED: Use the recommended require syntax for v4 ****
-const { AlipaySdk } = require('alipay-sdk');
-const axios = require('axios');
 
-// =================================================================
-// 2. 初始化服务 (Initialize Services)
-// =================================================================
-
-// 初始化 Firebase Admin SDK
+// --- **** NEW: Initialize Firebase **** ---
+// Get the service account key from environment variables
 try {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY_JSON);
     admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
+      credential: admin.credential.cert(serviceAccount)
     });
     console.log('✅ Firebase Admin SDK initialized successfully.');
 } catch (error) {
     console.error('❌ Firebase Admin SDK initialization failed:', error);
     process.exit(1); // Exit if Firebase cannot be initialized
 }
+
 const db = admin.firestore();
 
-// 初始化 Alipay SDK
-const alipaySdk = new AlipaySdk({
-    appId: process.env.ALIPAY_APP_ID,
-    privateKey: process.env.ALIPAY_PRIVATE_KEY,
-    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
-    gateway: 'https://openapi.alipay.com/gateway.do',
-    // **** FIXED: Explicitly specify the key type as PKCS8 ****
-    keyType: 'PKCS8',
-});
-console.log('✅ Alipay SDK initialized.');
 
-// 初始化 Express 应用
+// 创建一个应用实例
 const app = express();
+// Render 会自动提供 PORT 环境变量
 const PORT = process.env.PORT || 3001;
 
-// =================================================================
-// 3. 中间件设置 (Middleware Setup)
-// =================================================================
-app.use(cors()); // 允许跨域请求
-app.use(express.json()); // 解析JSON请求体
-app.use(express.urlencoded({ extended: true })); // 解析支付宝回调的表单数据
+// --- **** FIXED: Updated CORS whitelist with your new URL **** ---
+const whitelist = ['https://phenomenal-unicorn-ed016c.netlify.app']; // Your new frontend URL
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || whitelist.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+app.use(cors(corsOptions));
+app.use(express.json());
 
-// =================================================================
-// 4. API 路由定义 (API Routes)
-// =================================================================
 
-// --- 用户认证路由 (Auth Routes) ---
+// --- 从环境变量安全地读取API密钥 ---
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+
+// --- 内存数据库 (Will be replaced by Firebase) ---
+const localDb = {
+    users: {
+      'test': { password: '123', credits: 999 } 
+    }
+};
+
+// --- 用户注册接口 ---
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ message: '用户名和密码不能为空' });
+    if (!username || !password) {
+      return res.status(400).json({ message: '用户名和密码不能为空' });
+    }
     try {
         const userRef = db.collection('users').doc(username);
         const doc = await userRef.get();
-        if (doc.exists) return res.status(400).json({ message: '用户名已存在' });
-        
+
+        if (doc.exists) {
+            return res.status(400).json({ message: '用户名已存在' });
+        }
+
+        // In a real app, you MUST hash the password!
         await userRef.set({ username, password, credits: 50 });
-        console.log(`[Auth] New user registered: ${username}`);
+        
+        console.log('新用户注册成功:', username);
         res.status(201).json({ message: '注册成功！', user: { username, credits: 50 } });
     } catch (error) {
-        console.error("[Register Error]", error);
-        res.status(500).json({ message: "注册失败，服务器内部错误" });
+        console.error("Register error:", error);
+        res.status(500).json({ message: "注册失败，服务器错误" });
     }
 });
 
+// --- 用户登录接口 ---
 app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     try {
         const userRef = db.collection('users').doc(username);
         const doc = await userRef.get();
+
         if (!doc.exists || doc.data().password !== password) {
             return res.status(401).json({ message: '用户名或密码错误' });
         }
+        
         const userData = doc.data();
-        console.log(`[Auth] User logged in: ${username}`);
+        console.log('用户登录成功:', username);
         res.json({ message: '登录成功！', user: { username: userData.username, credits: userData.credits } });
     } catch (error) {
-        console.error("[Login Error]", error);
-        res.status(500).json({ message: "登录失败，服务器内部错误" });
+        console.error("Login error:", error);
+        res.status(500).json({ message: "登录失败，服务器错误" });
     }
 });
 
+// --- 获取用户状态接口 ---
 app.get('/api/user/:username', async (req, res) => {
     try {
         const { username } = req.params;
         const userRef = db.collection('users').doc(username);
         const doc = await userRef.get();
-        if (!doc.exists) return res.status(404).json({ message: '用户不存在' });
+
+        if (!doc.exists) {
+            return res.status(404).json({ message: '用户不存在' });
+        }
         const userData = doc.data();
         res.json({ user: { username: userData.username, credits: userData.credits } });
     } catch (error) {
-        console.error("[Get User Error]", error);
+        console.error("Get user status error:", error);
         res.status(500).json({ message: "获取用户信息失败" });
     }
 });
 
-// --- 支付路由 (Payment Routes) ---
-app.post('/api/create-alipay-order', async (req, res) => {
+// --- 模拟支付接口 ---
+app.post('/api/create-payment', async (req, res) => {
     const { username } = req.body;
-    const orderId = `XIAOE_${Date.now()}`;
-    console.log(`[Payment] Creating order for ${username}, OrderID: ${orderId}`);
     try {
-        const result = await alipaySdk.exec('alipay.trade.precreate', {
-            notifyUrl: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
-            bizContent: {
-                out_trade_no: orderId,
-                total_amount: '0.50',
-                subject: '小鹅评语机 - 50点数充值',
-                passback_params: encodeURIComponent(JSON.stringify({ username: username, orderId: orderId })),
-            },
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+
+        if (!doc.exists) {
+            return res.status(404).json({ message: '用户不存在，无法充值' });
+        }
+        
+        await userRef.update({
+            credits: admin.firestore.FieldValue.increment(50)
         });
-        console.log(`[Payment] QR Code URL received from Alipay for OrderID: ${orderId}`);
-        res.json({ qrCodeUrl: result.qrCode, orderId: orderId });
+        
+        const updatedDoc = await userRef.get();
+        const updatedUserData = updatedDoc.data();
+        
+        console.log(`模拟支付成功！用户 ${username} 的余额已更新为 ${updatedUserData.credits} 次。`);
+        res.json({
+            message: '充值成功！',
+            user: { username: updatedUserData.username, credits: updatedUserData.credits }
+        });
     } catch (error) {
-        console.error("[Alipay Order Error]", error);
-        res.status(500).json({ message: "创建支付订单失败" });
+        console.error("Payment error:", error);
+        res.status(500).json({ message: "充值失败，服务器错误" });
     }
 });
 
-app.post('/api/alipay-payment-notify', async (req, res) => {
-    console.log("[Payment] Received Alipay notification.");
-    try {
-        const isVerified = alipaySdk.checkNotifySign(req.body);
-        if (!isVerified) {
-            console.error("[Payment Notify] Signature verification failed!");
-            return res.status(400).send('failure');
-        }
-        console.log("[Payment Notify] Signature verified successfully.");
 
-        const { trade_status, out_trade_no, passback_params } = req.body;
-        if (trade_status === 'TRADE_SUCCESS' || trade_status === 'TRADE_FINISHED') {
-            const { username } = JSON.parse(decodeURIComponent(passback_params));
-            console.log(`[Payment Notify] Order ${out_trade_no} paid successfully by user: ${username}`);
-            
-            const userRef = db.collection('users').doc(username);
-            await userRef.update({ credits: admin.firestore.FieldValue.increment(50) });
-            console.log(`[Payment Notify] Credits updated for ${username}.`);
-        }
-        res.status(200).send('success');
-    } catch (error) {
-        console.error("[Payment Notify Error]", error);
-        res.status(500).send('failure');
-    }
-});
-
-// --- AI核心服务路由 (AI Core Routes) ---
+// --- 受保护的核心接口1：生成评语 ---
 app.post('/api/generate-comment', async (req, res) => {
     try {
         const { studentProfiles, commentStyle, model, username } = req.body;
         const userRef = db.collection('users').doc(username);
         const doc = await userRef.get();
-        if (!doc.exists) return res.status(401).json({ message: '用户未登录' });
+
+        if (!doc.exists) {
+            return res.status(401).json({ message: '用户未登录，请先登录' });
+        }
 
         const user = doc.data();
         const requiredCredits = studentProfiles.length;
+
         if (user.credits < requiredCredits) {
-            return res.status(403).json({ message: `点数不足！需要 ${requiredCredits} 点，剩余 ${user.credits} 点。` });
+            return res.status(403).json({ message: `次数不足！本次需要 ${requiredCredits} 次，您还剩 ${user.credits} 次。` });
         }
 
         const prompt = getBasePrompt(studentProfiles, commentStyle);
         const aiResponse = await callAI(model, prompt, false);
         
-        await userRef.update({ credits: admin.firestore.FieldValue.increment(-requiredCredits) });
-        console.log(`[AI Service] User ${username} used ${requiredCredits} credits, ${user.credits - requiredCredits} remaining.`);
+        await userRef.update({
+            credits: admin.firestore.FieldValue.increment(-requiredCredits)
+        });
+
+        console.log(`用户 ${username} 消耗 ${requiredCredits} 次，剩余 ${user.credits - requiredCredits} 次`);
         res.json(aiResponse);
     } catch (error) {
-        console.error('[Generate Comment Error]', error);
-        res.status(500).json({ message: '服务器处理评语生成请求失败', error: error.message });
+        console.error('处理【评语生成】请求时出错:', error);
+        res.status(500).json({ message: '服务器处理请求失败', error: error.message });
     }
 });
 
+// --- 受保护的核心接口2：生成同义句 ---
 app.post('/api/generate-alternatives', async (req, res) => {
     try {
         const { originalText, sourceTag, commentStyle, model, username } = req.body;
         const userRef = db.collection('users').doc(username);
         const doc = await userRef.get();
-        if (!doc.exists) return res.status(401).json({ message: '用户未登录' });
+        if (!doc.exists) {
+            return res.status(401).json({ message: '用户未登录，请先登录' });
+        }
         
         const prompt = `你是一个语言表达大师。请将下面的句子，用5种不同的、高质量的方式重新表达，同时保持核心意思和“${commentStyle}”的风格。句子：“${originalText}”。它描述的概念是“${sourceTag}”。请以JSON数组的格式返回5个字符串。`;
         const aiResponse = await callAI(model, prompt, true);
+        
         res.json(aiResponse);
     } catch (error) {
-        console.error('[Generate Alternatives Error]', error);
+        console.error('处理【同义句生成】请求时出错:', error);
         res.status(500).json({ message: '服务器处理同义句请求失败', error: error.message });
     }
 });
 
-// =================================================================
-// 5. 启动服务器 (Start Server)
-// =================================================================
 app.listen(PORT, () => {
-  console.log(`🚀 小鹅评语机后端服务已启动，监听端口: ${PORT}`);
+    console.log(`后台办公室已经启动，正在 http://localhost:${PORT} 等待指令`);
 });
 
-// =================================================================
-// 6. 辅助函数 (Helper Functions)
-// =================================================================
 async function callAI(model, prompt, isSimpleArray) {
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
-    let apiKey, url, payload, headers;
+  let apiKey, url, payload;
+  const commonHeaders = { 'Content-Type': 'application/json' };
 
-    if (model === 'gemini') {
-        apiKey = GEMINI_API_KEY;
-        url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-        const schema = isSimpleArray 
-            ? { type: 'ARRAY', items: { type: 'STRING' } } 
-            : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
-        payload = { 
-            contents: [{ role: "user", parts: [{ text: prompt }] }], 
-            generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
-        };
-        headers = { 'Content-Type': 'application/json' };
-    } else { // DeepSeek or OpenAI
-        const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
-        apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
-        const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
-        url = `${baseHost}/chat/completions`;
-        payload = {
-            model: modelName,
-            messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
-            response_format: { type: 'json_object' },
-            temperature: 0.8,
-            max_tokens: 8192, 
-        };
-        headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
-    }
+  if (model === 'gemini') {
+      apiKey = GEMINI_API_KEY;
+      url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+      const schema = isSimpleArray 
+          ? { type: 'ARRAY', items: { type: 'STRING' } } 
+          : { type: 'ARRAY', items: { type: 'OBJECT', properties: { studentName: { type: 'STRING' }, intro: { type: 'STRING' }, body: { type: 'ARRAY', items: { type: 'OBJECT', properties: { source: { type: 'STRING' }, text: { type: 'STRING' } } } }, conclusion: { type: 'STRING' } }, required: ['studentName', 'intro', 'body', 'conclusion'] } };
+      payload = { 
+          contents: [{ role: "user", parts: [{ text: prompt }] }], 
+          generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.8 } 
+      };
+  } else if (model === 'deepseek' || model === 'openai') {
+      const baseHost = model === 'openai' ? 'https://api.openai.com' : 'https://api.deepseek.com';
+      apiKey = model === 'openai' ? 'OPENAI_API_KEY_PLACEHOLDER' : DEEPSEEK_API_KEY;
+      const modelName = model === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat';
+      url = `${baseHost}/chat/completions`;
+      payload = {
+          model: modelName,
+          messages: [{ role: 'system', content: "You are a helpful assistant designed to output JSON." }, { role: 'user', content: prompt }],
+          response_format: { type: 'json_object' },
+          temperature: 0.8,
+          max_tokens: 8192, 
+      };
+      commonHeaders['Authorization'] = `Bearer ${apiKey}`;
+  } else {
+      throw new Error('不支持的AI模型');
+  }
 
-    try {
-        const response = await axios.post(url, payload, { headers });
-        const data = response.data;
-        let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
-        let jsonString = rawText;
-        const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
-        if (match) jsonString = match[1] || match[2];
-        return findArrayInJson(JSON.parse(jsonString));
-    } catch (error) {
-        console.error(`[AI Call Error - ${model}]`, error.response ? error.response.data : error.message);
-        throw new Error(`${model} API call failed`);
-    }
+  const response = await fetch(url, { method: 'POST', headers: commonHeaders, body: JSON.stringify(payload) });
+  if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`${model} API Error Body:`, errorBody);
+      throw new Error(`${model} API error: ${response.statusText}`);
+  }
+  const data = await response.json();
+  let rawText = model === 'gemini' ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
+  
+  let jsonString = rawText;
+  const match = rawText.match(/```json\s*([\s\S]*?)\s*```|(\[.*\]|\{.*\})/s);
+  if (match) jsonString = match[1] || match[2];
+
+  return findArrayInJson(JSON.parse(jsonString));
 }
 
 function getBasePrompt(profiles, style) {
