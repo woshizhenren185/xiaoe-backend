@@ -24,16 +24,23 @@ try {
 }
 const db = admin.firestore();
 
+// **** FIXED: Robustly handle private key from environment variable ****
+// Environment variables might escape newlines. We need to restore them.
+const formatKey = (key) => {
+    return key.replace(/\\n/g, '\n');
+};
+
 // 初始化 Alipay SDK
 const alipaySdk = new AlipaySdk({
     appId: process.env.ALIPAY_APP_ID,
-    privateKey: process.env.ALIPAY_PRIVATE_KEY,
-    alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
+    privateKey: formatKey(process.env.ALIPAY_PRIVATE_KEY),
+    alipayPublicKey: formatKey(process.env.ALIPAY_PUBLIC_KEY),
     gateway: 'https://openapi.alipay.com/gateway.do',
     keyType: 'PKCS8',
 });
 console.log('✅ Alipay SDK initialized.');
 
+// 初始化 Express 应用
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -48,7 +55,7 @@ app.use(express.urlencoded({ extended: true }));
 // 4. API 路由定义 (API Routes)
 // =================================================================
 
-// --- 用户认证路由 ---
+// --- 用户认证路由 (Auth Routes) ---
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: '用户名和密码不能为空' });
@@ -97,7 +104,7 @@ app.get('/api/user/:username', async (req, res) => {
     }
 });
 
-// --- 支付路由 ---
+// --- 支付路由 (Payment Routes) ---
 app.post('/api/create-alipay-order', async (req, res) => {
     const { username } = req.body;
     const orderId = `XIAOE_${Date.now()}`;
@@ -146,7 +153,7 @@ app.post('/api/alipay-payment-notify', async (req, res) => {
     }
 });
 
-// --- AI核心服务路由 ---
+// --- AI核心服务路由 (AI Core Routes) ---
 app.post('/api/generate-comment', async (req, res) => {
     try {
         const { studentProfiles, commentStyle, model, username } = req.body;
@@ -169,6 +176,22 @@ app.post('/api/generate-comment', async (req, res) => {
     } catch (error) {
         console.error('[Generate Comment Error]', error);
         res.status(500).json({ message: '服务器处理评语生成请求失败', error: error.message });
+    }
+});
+
+app.post('/api/generate-alternatives', async (req, res) => {
+    try {
+        const { originalText, sourceTag, commentStyle, model, username } = req.body;
+        const userRef = db.collection('users').doc(username);
+        const doc = await userRef.get();
+        if (!doc.exists) return res.status(401).json({ message: '用户未登录' });
+        
+        const prompt = `你是一个语言表达大师。请将下面的句子，用5种不同的、高质量的方式重新表达，同时保持核心意思和“${commentStyle}”的风格。句子：“${originalText}”。它描述的概念是“${sourceTag}”。请以JSON数组的格式返回5个字符串。`;
+        const aiResponse = await callAI(model, prompt, true);
+        res.json(aiResponse);
+    } catch (error) {
+        console.error('[Generate Alternatives Error]', error);
+        res.status(500).json({ message: '服务器处理同义句请求失败', error: error.message });
     }
 });
 
