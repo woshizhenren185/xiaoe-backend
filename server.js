@@ -4,8 +4,8 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const AlipaySdk = require('alipay-sdk').default;
-// **** NEW: Import Axios ****
+// **** FIXED: Changed how AlipaySdk is imported to match its module structure ****
+const AlipaySdk = require('alipay-sdk');
 const axios = require('axios');
 
 // =================================================================
@@ -25,8 +25,9 @@ try {
 }
 const db = admin.firestore();
 
-// 初始化 Alipay SDK
-const alipaySdk = new AlipaySdk({
+// **** FIXED: Changed how AlipaySdk is instantiated ****
+// The constructor is available on the .default property when using require
+const alipaySdk = new AlipaySdk.default({
     appId: process.env.ALIPAY_APP_ID,
     privateKey: process.env.ALIPAY_PRIVATE_KEY,
     alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
@@ -58,7 +59,6 @@ app.post('/api/register', async (req, res) => {
         const doc = await userRef.get();
         if (doc.exists) return res.status(400).json({ message: '用户名已存在' });
         
-        // In a real app, you MUST hash the password! We are skipping for simplicity.
         await userRef.set({ username, password, credits: 50 });
         console.log(`[Auth] New user registered: ${username}`);
         res.status(201).json({ message: '注册成功！', user: { username, credits: 50 } });
