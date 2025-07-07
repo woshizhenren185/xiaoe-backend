@@ -8,28 +8,7 @@ const { AlipaySdk } = require('alipay-sdk');
 const axios = require('axios');
 
 // =================================================================
-// 2. 环境变量自检 (Pre-flight Environment Checks)
-// =================================================================
-const requiredEnvVars = [
-    'FIREBASE_SERVICE_ACCOUNT_KEY_JSON',
-    'ALIPAY_APP_ID',
-    'ALIPAY_PRIVATE_KEY',
-    'ALIPAY_PUBLIC_KEY',
-    'GEMINI_API_KEY',
-    'DEEPSEEK_API_KEY'
-];
-
-const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
-if (missingVars.length > 0) {
-    console.error('❌ 启动失败：缺少以下必要的环境变量，请在Render.com上进行配置:');
-    missingVars.forEach(varName => console.error(` - ${varName}`));
-    process.exit(1); // 停止服务
-}
-console.log('✅ 所有环境变量均已配置.');
-
-// =================================================================
-// 3. 初始化服务 (Initialize Services)
+// 2. 初始化服务 (Initialize Services)
 // =================================================================
 
 // 初始化 Firebase Admin SDK
@@ -38,15 +17,16 @@ try {
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
     });
-    console.log('✅ Firebase Admin SDK 初始化成功.');
+    console.log('✅ Firebase Admin SDK initialized successfully.');
 } catch (error) {
-    console.error('❌ Firebase Admin SDK 初始化失败:', error);
+    console.error('❌ Firebase Admin SDK initialization failed:', error);
     process.exit(1);
 }
 const db = admin.firestore();
 
 // 密钥格式化函数
 const formatKey = (key) => {
+    if (!key) return '';
     return key.replace(/\\n/g, '\n');
 };
 
@@ -58,35 +38,24 @@ const alipaySdk = new AlipaySdk({
     gateway: 'https://openapi.alipay.com/gateway.do',
     keyType: 'PKCS8',
 });
-console.log('✅ Alipay SDK 初始化成功.');
+console.log('✅ Alipay SDK initialized.');
 
 // 初始化 Express 应用
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // =================================================================
-// 4. 中间件设置 (Middleware Setup)
+// 3. 中间件设置 (Middleware Setup)
 // =================================================================
 
-const whitelist = [
-    'https://taupe-churros-3f5212.netlify.app',
-    'https://phenomenal-unicorn-ed016c.netlify.app'
-];
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (whitelist.indexOf(origin) !== -1 || !origin) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
-};
-app.use(cors(corsOptions));
+// **** FIXED: Use a more standard and permissive CORS setup ****
+// This will solve the "Failed to fetch" issue for all requests.
+app.use(cors()); 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // =================================================================
-// 5. API 路由定义 (API Routes)
+// 4. API 路由定义 (API Routes)
 // =================================================================
 
 // --- 用户认证路由 (Auth Routes) ---
@@ -230,14 +199,14 @@ app.post('/api/generate-alternatives', async (req, res) => {
 });
 
 // =================================================================
-// 6. 启动服务器 (Start Server)
+// 5. 启动服务器 (Start Server)
 // =================================================================
 app.listen(PORT, () => {
   console.log(`🚀 小鹅评语机后端服务已启动，监听端口: ${PORT}`);
 });
 
 // =================================================================
-// 7. 辅助函数 (Helper Functions)
+// 6. 辅助函数 (Helper Functions)
 // =================================================================
 async function callAI(model, prompt, isSimpleArray) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
