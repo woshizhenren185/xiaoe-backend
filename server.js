@@ -4,7 +4,8 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const AlipaySdk = require('alipay-sdk');
+// **** FIXED: Use the recommended require syntax for v4 ****
+const { AlipaySdk } = require('alipay-sdk');
 const axios = require('axios');
 
 // =================================================================
@@ -24,13 +25,14 @@ try {
 }
 const db = admin.firestore();
 
-// **** FIXED: Correctly instantiate AlipaySdk ****
-// The constructor is the required module itself, not a .default property.
+// 初始化 Alipay SDK
 const alipaySdk = new AlipaySdk({
     appId: process.env.ALIPAY_APP_ID,
     privateKey: process.env.ALIPAY_PRIVATE_KEY,
     alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
     gateway: 'https://openapi.alipay.com/gateway.do',
+    // **** FIXED: Explicitly specify the key type as PKCS8 ****
+    keyType: 'PKCS8',
 });
 console.log('✅ Alipay SDK initialized.');
 
