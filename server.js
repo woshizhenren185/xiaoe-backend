@@ -4,8 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-// **** FIXED: Use the correct require syntax for v4 ****
-const { AlipaySdk } = require('alipay-sdk');
+const AlipaySdk = require('alipay-sdk').default;
 const axios = require('axios');
 
 // =================================================================
@@ -110,23 +109,22 @@ app.post('/api/create-alipay-order', async (req, res, next) => {
         console.log(`[Payment] Creating order for ${username}, OrderID: ${orderId}`);
         if (!alipaySdk) throw new Error("Alipay SDK not initialized.");
 
-        // **** FIXED: Use the modern .curl() method instead of the deprecated .exec() ****
-        const result = await alipaySdk.curl('alipay.trade.precreate', {
-            notify_url: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
-            biz_content: {
+        // **** FIXED: Use the modern pageExecute method for PC web payments ****
+        const payUrl = alipaySdk.pageExecute('alipay.trade.page.pay', {
+            notifyUrl: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
+            returnUrl: `https://phenomenal-unicorn-ed016c.netlify.app`, // URL to redirect after payment
+            bizContent: {
                 out_trade_no: orderId,
                 total_amount: '0.50',
                 subject: '小鹅评语机 - 50点数充值',
+                product_code: 'FAST_INSTANT_TRADE_PAY', // Required for PC web payment
                 passback_params: encodeURIComponent(JSON.stringify({ username: username, orderId: orderId })),
             },
         });
         
-        if(result.code !== '10000'){
-            throw new Error(`Alipay precreate failed: ${result.subMsg || result.msg}`);
-        }
+        console.log(`[Payment] Payment URL generated for OrderID: ${orderId}`);
+        res.json({ payUrl: payUrl });
 
-        console.log(`[Payment] QR Code URL received from Alipay for OrderID: ${orderId}`);
-        res.json({ qrCodeUrl: result.qrCode, orderId: orderId });
     } catch (error) {
         next(error);
     }
@@ -159,7 +157,7 @@ app.post('/api/alipay-payment-notify', async (req, res, next) => {
 });
 
 // --- AI核心服务路由 (AI Core Routes) ---
-// ... (Omitted for brevity, no changes)
+// ... (Omitted for brevity)
 
 // =================================================================
 // 5. 全局错误处理 (Global Error Handler)
@@ -180,4 +178,4 @@ app.listen(PORT, () => {
 // =================================================================
 // 7. 辅助函数 (Helper Functions)
 // =================================================================
-// ... (Omitted for brevity, no changes)
+// ... (Omitted for brevity)
