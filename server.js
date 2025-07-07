@@ -26,8 +26,11 @@ const app = express();
 // Render 会自动提供 PORT 环境变量
 const PORT = process.env.PORT || 3001;
 
-// --- **** FIXED: Updated CORS whitelist with your new URL **** ---
-const whitelist = ['https://phenomenal-unicorn-ed016c.netlify.app']; // Your new frontend URL
+// --- **** FIXED: Updated CORS whitelist with both of your URLs **** ---
+const whitelist = [
+    'https://taupe-churros-3f5212.netlify.app', 
+    'https://phenomenal-unicorn-ed016c.netlify.app'
+];
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
