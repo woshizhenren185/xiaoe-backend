@@ -36,6 +36,7 @@ const alipaySdk = new AlipaySdk({
     privateKey: formatKey(process.env.ALIPAY_PRIVATE_KEY),
     alipayPublicKey: formatKey(process.env.ALIPAY_PUBLIC_KEY),
     gateway: 'https://openapi.alipay.com/gateway.do',
+    // **** FIXED: Explicitly specify the key type as PKCS8 according to the official docs ****
     keyType: 'PKCS8',
 });
 console.log('✅ Alipay SDK initialized.');
@@ -47,10 +48,20 @@ const PORT = process.env.PORT || 3001;
 // =================================================================
 // 3. 中间件设置 (Middleware Setup)
 // =================================================================
-
-// **** FIXED: Use a more standard and permissive CORS setup ****
-// This will solve the "Failed to fetch" issue for all requests.
-app.use(cors()); 
+const whitelist = [
+    'https://taupe-churros-3f5212.netlify.app',
+    'https://phenomenal-unicorn-ed016c.netlify.app'
+];
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (whitelist.indexOf(origin) !== -1 || !origin) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
