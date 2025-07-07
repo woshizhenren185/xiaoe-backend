@@ -4,7 +4,6 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-// **** FIXED: Changed how AlipaySdk is imported to match its module structure ****
 const AlipaySdk = require('alipay-sdk');
 const axios = require('axios');
 
@@ -25,9 +24,9 @@ try {
 }
 const db = admin.firestore();
 
-// **** FIXED: Changed how AlipaySdk is instantiated ****
-// The constructor is available on the .default property when using require
-const alipaySdk = new AlipaySdk.default({
+// **** FIXED: Correctly instantiate AlipaySdk ****
+// The constructor is the required module itself, not a .default property.
+const alipaySdk = new AlipaySdk({
     appId: process.env.ALIPAY_APP_ID,
     privateKey: process.env.ALIPAY_PRIVATE_KEY,
     alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
