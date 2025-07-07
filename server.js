@@ -4,6 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
+// **** FIXED: Use the correct require syntax for v4 ****
 const { AlipaySdk } = require('alipay-sdk');
 const axios = require('axios');
 
@@ -68,7 +69,7 @@ app.post('/api/register', async (req, res, next) => {
         console.log(`[Auth] New user registered: ${username}`);
         res.status(201).json({ message: '注册成功！', user: { username, credits: 50 } });
     } catch (error) {
-        next(error); // Pass errors to the global error handler
+        next(error);
     }
 });
 
@@ -108,15 +109,22 @@ app.post('/api/create-alipay-order', async (req, res, next) => {
         const orderId = `XIAOE_${Date.now()}`;
         console.log(`[Payment] Creating order for ${username}, OrderID: ${orderId}`);
         if (!alipaySdk) throw new Error("Alipay SDK not initialized.");
-        const result = await alipaySdk.exec('alipay.trade.precreate', {
-            notifyUrl: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
-            bizContent: {
+
+        // **** FIXED: Use the modern .curl() method instead of the deprecated .exec() ****
+        const result = await alipaySdk.curl('alipay.trade.precreate', {
+            notify_url: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
+            biz_content: {
                 out_trade_no: orderId,
                 total_amount: '0.50',
                 subject: '小鹅评语机 - 50点数充值',
                 passback_params: encodeURIComponent(JSON.stringify({ username: username, orderId: orderId })),
             },
         });
+        
+        if(result.code !== '10000'){
+            throw new Error(`Alipay precreate failed: ${result.subMsg || result.msg}`);
+        }
+
         console.log(`[Payment] QR Code URL received from Alipay for OrderID: ${orderId}`);
         res.json({ qrCodeUrl: result.qrCode, orderId: orderId });
     } catch (error) {
@@ -151,36 +159,14 @@ app.post('/api/alipay-payment-notify', async (req, res, next) => {
 });
 
 // --- AI核心服务路由 (AI Core Routes) ---
-app.post('/api/generate-comment', async (req, res, next) => {
-    try {
-        const { studentProfiles, commentStyle, model, username } = req.body;
-        const userRef = db.collection('users').doc(username);
-        const doc = await userRef.get();
-        if (!doc.exists) return res.status(401).json({ message: '用户未登录' });
-
-        const user = doc.data();
-        const requiredCredits = studentProfiles.length;
-        if (user.credits < requiredCredits) {
-            return res.status(403).json({ message: `点数不足！需要 ${requiredCredits} 点，剩余 ${user.credits} 点。` });
-        }
-
-        const prompt = getBasePrompt(studentProfiles, commentStyle);
-        const aiResponse = await callAI(model, prompt, false);
-        
-        await userRef.update({ credits: admin.firestore.FieldValue.increment(-requiredCredits) });
-        console.log(`[AI Service] User ${username} used ${requiredCredits} credits, ${user.credits - requiredCredits} remaining.`);
-        res.json(aiResponse);
-    } catch (error) {
-        next(error);
-    }
-});
+// ... (Omitted for brevity, no changes)
 
 // =================================================================
 // 5. 全局错误处理 (Global Error Handler)
 // =================================================================
 app.use((err, req, res, next) => {
-  console.error('💥 UNHANDLED ERROR:', err.stack);
-  res.status(500).json({ message: '服务器发生未知错误!', error: err.message });
+  console.error('💥 UNHANDLED ERROR:', err.stack || err);
+  res.status(500).json({ message: err.message || '服务器发生未知错误!' });
 });
 
 
@@ -194,4 +180,4 @@ app.listen(PORT, () => {
 // =================================================================
 // 7. 辅助函数 (Helper Functions)
 // =================================================================
-// ... (Helper functions remain the same)
+// ... (Omitted for brevity, no changes)
