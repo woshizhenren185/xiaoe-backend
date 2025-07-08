@@ -4,7 +4,8 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const AlipaySdk = require('alipay-sdk').default;
+// **** FIXED: Use the correct require syntax for v4 as per official docs ****
+const { AlipaySdk } = require('alipay-sdk');
 const axios = require('axios');
 
 // =================================================================
@@ -109,15 +110,14 @@ app.post('/api/create-alipay-order', async (req, res, next) => {
         console.log(`[Payment] Creating order for ${username}, OrderID: ${orderId}`);
         if (!alipaySdk) throw new Error("Alipay SDK not initialized.");
 
-        // **** FIXED: Use the modern pageExecute method for PC web payments ****
         const payUrl = alipaySdk.pageExecute('alipay.trade.page.pay', {
             notifyUrl: `https://xiaoe-backend.onrender.com/api/alipay-payment-notify`,
-            returnUrl: `https://phenomenal-unicorn-ed016c.netlify.app`, // URL to redirect to after payment on Alipay's site
+            returnUrl: `https://phenomenal-unicorn-ed016c.netlify.app`, 
             bizContent: {
                 out_trade_no: orderId,
                 total_amount: '0.50',
                 subject: '小鹅评语机 - 50点数充值',
-                product_code: 'FAST_INSTANT_TRADE_PAY', // Required for PC web payment
+                product_code: 'FAST_INSTANT_TRADE_PAY',
                 passback_params: encodeURIComponent(JSON.stringify({ username: username, orderId: orderId })),
             },
         });
