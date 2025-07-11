@@ -4,7 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
-const { AlipaySdk } = require('alipay-sdk');
+const AlipaySdk = require('alipay-sdk').default;
 const axios = require('axios');
 
 // =================================================================
